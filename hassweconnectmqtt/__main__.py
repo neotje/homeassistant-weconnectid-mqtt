@@ -1,6 +1,7 @@
 import argparse
 from io import FileIO
 import logging
+from typing import List
 
 from weconnect import addressable, weconnect
 from weconnect.elements.battery_status import BatteryStatus
@@ -9,8 +10,10 @@ import paho.mqtt.client as mqtt
 import time
 
 from weconnect.elements.charging_status import ChargingStatus
+from weconnect.elements.parking_position import ParkingPosition
 from weconnect.elements.plug_status import PlugStatus
 from weconnect.elements.climatization_status import ClimatizationStatus
+from weconnect.elements.access_status import AccessStatus
 
 from hassweconnectmqtt.component.binary import Binary
 from hassweconnectmqtt.component.device import Device
@@ -22,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def main():
-    observers = []
+    observers: List[VehicleObserver] = []
 
     parser = argparse.ArgumentParser(prog='hass-weconnect-mqtt')
 
@@ -58,9 +61,11 @@ def main():
             connection.update(updateCapabilities=False, updatePictures=False)
             LOGGER.info("update")
             time.sleep(args.interval)
+    except BaseException as e:
+        LOGGER.error(e)
 
-    except KeyboardInterrupt:
-        pass
+    for observer in observers:
+        observer.close()
     
     client.loop_stop()
     client.disconnect()
@@ -76,10 +81,15 @@ class VehicleObserver:
             f = FileIO(f"{imageSaveFolder}{vehicle.vin.value}.png", 'w')
             self.vehicle.pictures['car'].value.save(f, 'PNG')
 
+        for v in vehicle.statuses.keys():
+            LOGGER.info(v)
+
+        self.access_status = vehicle.statuses.get('accessStatus')
         self.battery_status = vehicle.statuses.get('batteryStatus')
         self.charging_status = vehicle.statuses.get('chargingStatus')
-        self.plug_status = vehicle.statuses.get('plugStatus')
         self.climatisation_status = vehicle.statuses.get('climatisationStatus')
+        self.parking_position = vehicle.statuses.get('parkingPosition')
+        self.plug_status = vehicle.statuses.get('plugStatus')        
 
         self.sensors = {}
         self.binaries = {}
@@ -87,6 +97,11 @@ class VehicleObserver:
 
         self.device = Device(vehicle.nickname.value, "Volkswagen",
                              vehicle.model.value, vehicle.vin.value)
+
+        self.addSensor(self.vehicle.vin, "VIN")
+
+        if isinstance(self.access_status, AccessStatus):
+            self.addSensor(self.access_status.overallStatus, "Access")
 
         if isinstance(self.battery_status, BatteryStatus):
             self.addSensor(self.battery_status.currentSOC_pct, "Battery percentage", "battery", "%")
@@ -98,13 +113,17 @@ class VehicleObserver:
             self.addSensor(self.charging_status.chargePower_kW, "Charge power", "power", "W")
             self.addSensor(self.charging_status.chargeRate_kmph, "Charge rate", unit_of_measurement="kmph")
 
-        if isinstance(self.plug_status, PlugStatus):
-            self.addBinary(self.plug_status.plugConnectionState, "Plug", [PlugStatus.PlugConnectionState.CONNECTED], [], "plug")
-            self.addBinary(self.plug_status.plugLockState, "Plug lock", [PlugStatus.PlugLockState.LOCKED], [], "lock")
-
         if isinstance(self.climatisation_status, ClimatizationStatus):
             self.addSensor(self.climatisation_status.remainingClimatisationTime_min, "Remaining climatisation time", unit_of_measurement="minutes")
             self.addBinary(self.climatisation_status.climatisationState, "Climatisation", [ClimatizationStatus.ClimatizationState.COOLING, ClimatizationStatus.ClimatizationState.HEATING, ClimatizationStatus.ClimatizationState.VENTILATION], [], "power")
+
+        if isinstance(self.parking_position, ParkingPosition):
+            self.addSensor(self.parking_position.latitude, "Parking Latitude")
+            self.addSensor(self.parking_position.longitude, "Parking Longitude")
+
+        if isinstance(self.plug_status, PlugStatus):
+            self.addBinary(self.plug_status.plugConnectionState, "Plug", [PlugStatus.PlugConnectionState.CONNECTED], [], "plug")
+            self.addBinary(self.plug_status.plugLockState, "Plug lock", [PlugStatus.PlugLockState.LOCKED], [], "lock")
 
     def addSensor(self, attribute: addressable.AddressableAttribute, name, device_class=None, unit_of_measurement=None):
         address, id = self.get_ids(attribute)
@@ -112,11 +131,11 @@ class VehicleObserver:
         sensor = Sensor(self.client, id, name, self.device,
                         device_class, unit_of_measurement)
         sensor.publish_config()
-        sensor.available = True
+        sensor.available = attribute.enabled
 
         self.sensors[address] = sensor
         self.setSensor(attribute)
-        attribute.addObserver(self.on_sensor, addressable.AddressableLeaf.ObserverEvent.VALUE_CHANGED)
+        attribute.addObserver(self.on_sensor, addressable.AddressableLeaf.ObserverEvent.ALL)
 
     def addBinary(self, attribute: addressable.AddressableAttribute, name: str, enable_value: list = [True], disable_value: list = [False], device_class: str = None):
         address, id = self.get_ids(attribute)
@@ -124,7 +143,7 @@ class VehicleObserver:
         binary = Binary(self.client, id, name, self.device,
                         device_class, enable_value, disable_value)
         binary.publish_config()
-        binary.available = True
+        binary.available = attribute.enabled
 
         self.binaries[address] = binary
         self.setBinary(attribute)
@@ -145,6 +164,9 @@ class VehicleObserver:
 
         value = attribute.value
 
+        if type(value) == AccessStatus.OverallState:
+            value = value.name
+
         if type(value) == ChargingStatus.ChargingState:
             if value in [ChargingStatus.ChargingState.OFF, ChargingStatus.ChargingState.READY_FOR_CHARGING, ChargingStatus.ChargingState.ERROR]:
                 value = "off"
@@ -154,7 +176,7 @@ class VehicleObserver:
         if type(value) == ChargingStatus.ChargeMode:
             value = value.value
 
-        sensor.available = True
+        sensor.available = attribute.enabled
         sensor.publish_state(value)
         LOGGER.info(f"sensor: {sensor._unique_id}")
 
@@ -167,12 +189,20 @@ class VehicleObserver:
 
         value = attribute.value
 
-        binary.available = True
+        binary.available = attribute.enabled
         binary.set_state(value)
         LOGGER.info(f"binary: {binary._unique_id}")
 
     def on_binary(self, element, flags):
         self.setBinary(element)
+
+    def close(self):
+        for sensor in self.sensors.values():
+            sensor.available = False
+        
+        for binary in self.binaries.values():
+            binary.available = False
+    
 
 
 if __name__ == '__main__':

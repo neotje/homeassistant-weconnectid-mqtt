@@ -99,6 +99,7 @@ class VehicleObserver:
                              vehicle.model.value, vehicle.vin.value)
 
         self.addSensor(self.vehicle.vin, "VIN")
+        self.addSensor(self.vehicle.nickname, "Nickname")
 
         if isinstance(self.access_status, AccessStatus):
             self.addSensor(self.access_status.overallStatus, "Access")

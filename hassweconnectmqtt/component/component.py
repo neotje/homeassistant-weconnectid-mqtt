@@ -59,7 +59,7 @@ class Component:
 
         self._available = available
 
-        self._client.publish(self.availability_topic, payload)
+        self._client.publish(self.availability_topic, payload, retain=True)
 
     def get_base_config(self) -> object:
         config = {

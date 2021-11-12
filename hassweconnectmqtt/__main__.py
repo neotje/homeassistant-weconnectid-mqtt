@@ -129,6 +129,8 @@ class VehicleObserver:
     def addSensor(self, attribute: addressable.AddressableAttribute, name, device_class=None, unit_of_measurement=None):
         address, id = self.get_ids(attribute)
 
+        name = f"{self.vehicle.nickname.value} {name}"
+
         sensor = Sensor(self.client, id, name, self.device,
                         device_class, unit_of_measurement)
         sensor.publish_config()
@@ -140,6 +142,8 @@ class VehicleObserver:
 
     def addBinary(self, attribute: addressable.AddressableAttribute, name: str, enable_value: list = [True], disable_value: list = [False], device_class: str = None):
         address, id = self.get_ids(attribute)
+
+        name = f"{self.vehicle.nickname.value} {name}"
 
         binary = Binary(self.client, id, name, self.device,
                         device_class, enable_value, disable_value)

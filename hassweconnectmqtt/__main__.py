@@ -39,7 +39,7 @@ def main():
                         help='Password of We Connect ID account', required=True)
     parser.add_argument('-i', '--interval', type=int,
                         help='API request interval', default=300, required=False)
-    parser.add_argument('--images', type=str, default=None, required=False)
+    parser.add_argument('--images', type=str, help="Vehicle images save folder. filename=[VIN].png", default=None, required=False)
     
 
     args = parser.parse_args()

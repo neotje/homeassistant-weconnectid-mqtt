@@ -10,6 +10,7 @@ import paho.mqtt.client as mqtt
 import time
 
 from weconnect.elements.charging_status import ChargingStatus
+from weconnect.elements.control_operation import ControlOperation
 from weconnect.elements.parking_position import ParkingPosition
 from weconnect.elements.plug_status import PlugStatus
 from weconnect.elements.climatization_status import ClimatizationStatus
@@ -18,6 +19,7 @@ from weconnect.elements.access_status import AccessStatus
 from hassweconnectmqtt.component.binary import Binary
 from hassweconnectmqtt.component.device import Device
 from hassweconnectmqtt.component.sensor import Sensor
+from hassweconnectmqtt.component.switch import Switch
 
 logging.basicConfig(level=logging.INFO)
 
@@ -84,15 +86,22 @@ class VehicleObserver:
         for v in vehicle.statuses.keys():
             LOGGER.info(v)
 
+        # status objects
         self.access_status = vehicle.statuses.get('accessStatus')
         self.battery_status = vehicle.statuses.get('batteryStatus')
         self.charging_status = vehicle.statuses.get('chargingStatus')
         self.climatisation_status = vehicle.statuses.get('climatisationStatus')
         self.parking_position = vehicle.statuses.get('parkingPosition')
-        self.plug_status = vehicle.statuses.get('plugStatus')        
+        self.plug_status = vehicle.statuses.get('plugStatus')
+
+        self.climatisation_controls = vehicle.controls.climatizationControl
+        self.charging_controls = vehicle.controls.chargingControl
+
+        
 
         self.sensors = {}
         self.binaries = {}
+        self.switches = {}
         self.client = client
 
         self.device = Device(vehicle.nickname.value, "Volkswagen",
@@ -113,10 +122,12 @@ class VehicleObserver:
             self.addSensor(self.charging_status.chargeMode, "Charge mode")
             self.addSensor(self.charging_status.chargePower_kW, "Charge power", "power", "W")
             self.addSensor(self.charging_status.chargeRate_kmph, "Charge rate", unit_of_measurement="kmph")
+            #self.addSwitch(self.charging_controls, self.charging_status.chargingState, "Charge switch", [ChargingStatus.ChargingState.CHARGING], [])
 
         if isinstance(self.climatisation_status, ClimatizationStatus):
             self.addSensor(self.climatisation_status.remainingClimatisationTime_min, "Remaining climatisation time", unit_of_measurement="minutes")
             self.addBinary(self.climatisation_status.climatisationState, "Climatisation", [ClimatizationStatus.ClimatizationState.COOLING, ClimatizationStatus.ClimatizationState.HEATING, ClimatizationStatus.ClimatizationState.VENTILATION], [], "power")
+            self.addSwitch(self.climatisation_controls, self.climatisation_status.climatisationState, "Climatisation switch", [ClimatizationStatus.ClimatizationState.COOLING, ClimatizationStatus.ClimatizationState.HEATING, ClimatizationStatus.ClimatizationState.VENTILATION], [])
 
         if isinstance(self.parking_position, ParkingPosition):
             self.addSensor(self.parking_position.latitude, "Parking Latitude")
@@ -125,11 +136,10 @@ class VehicleObserver:
         if isinstance(self.plug_status, PlugStatus):
             self.addBinary(self.plug_status.plugConnectionState, "Plug", [PlugStatus.PlugConnectionState.CONNECTED], [], "plug")
             self.addBinary(self.plug_status.plugLockState, "Plug lock", [PlugStatus.PlugLockState.LOCKED], [], "lock")
-
+    
     def addSensor(self, attribute: addressable.AddressableAttribute, name, device_class=None, unit_of_measurement=None):
         address, id = self.get_ids(attribute)
-
-        name = f"{self.vehicle.nickname.value} {name}"
+        name = self.format_name(name)
 
         sensor = Sensor(self.client, id, name, self.device,
                         device_class, unit_of_measurement)
@@ -142,8 +152,7 @@ class VehicleObserver:
 
     def addBinary(self, attribute: addressable.AddressableAttribute, name: str, enable_value: list = [True], disable_value: list = [False], device_class: str = None):
         address, id = self.get_ids(attribute)
-
-        name = f"{self.vehicle.nickname.value} {name}"
+        name = self.format_name(name)
 
         binary = Binary(self.client, id, name, self.device,
                         device_class, enable_value, disable_value)
@@ -154,6 +163,26 @@ class VehicleObserver:
         self.setBinary(attribute)
         attribute.addObserver(self.on_binary, addressable.AddressableLeaf.ObserverEvent.ALL)
 
+    def addSwitch(self, changeable: addressable.ChangeableAttribute, status: addressable.AddressableAttribute, name: str, enable_value: list = [True], disable_value: list = [False]):
+        address, id = self.get_ids(changeable)
+        name = self.format_name(name)
+
+        switch = Switch(self.client, id, name, status, self.device, enable_value, disable_value)
+        switch.publish_config()
+        switch.available = changeable.enabled
+
+        def cb(state):
+            if state:
+                changeable.value = ControlOperation.START
+            else:
+                changeable.value = ControlOperation.STOP
+
+            LOGGER.info(changeable.value)
+
+        switch.on_command(cb)
+
+        self.switches[address] = switch
+
     def get_ids(self, attribute: addressable.AddressableAttribute):
         address = attribute.getLocalAddress()
         id = self.get_unique_id(address)
@@ -162,6 +191,9 @@ class VehicleObserver:
 
     def get_unique_id(self, address):
         return f"{self.vehicle.vin}_{address}"
+
+    def format_name(self, name):
+        return f"{self.vehicle.nickname.value} {name}"
 
     def setSensor(self, attribute: addressable.AddressableAttribute):
         address = attribute.getLocalAddress()
@@ -207,6 +239,9 @@ class VehicleObserver:
         
         for binary in self.binaries.values():
             binary.available = False
+
+        for switch in self.switches.values():
+            switch.available = False
     
 
 

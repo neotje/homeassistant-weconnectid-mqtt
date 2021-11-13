@@ -63,6 +63,7 @@ class Component:
 
     def get_base_config(self) -> object:
         config = {
+            "availability_mode": "latest",
             "availability_topic": self.availability_topic,
             "name": self._name,
             "state_topic": self.state_topic,

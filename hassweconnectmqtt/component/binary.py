@@ -4,7 +4,7 @@ import paho.mqtt.client as mqtt
 from hassweconnectmqtt.component.component import Component
 from hassweconnectmqtt.component.device import Device
 
-SENSOR_TYPE = "binary_sensor"
+BINARY_TYPE = "binary_sensor"
 
 class Binary(Component):
     device_class: str
@@ -30,7 +30,7 @@ class Binary(Component):
 
     @property
     def type(self) -> str:
-        return SENSOR_TYPE
+        return BINARY_TYPE
 
     def get_config(self, config: object) -> object:
         if self.device_class is not None:

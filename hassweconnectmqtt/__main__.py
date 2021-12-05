@@ -120,7 +120,7 @@ class VehicleObserver:
         if isinstance(self.charging_status, ChargingStatus):
             self.addBinary(self.charging_status.chargingState, "Charge state", [ChargingStatus.ChargingState.CHARGING], [], "battery_charging")
             self.addSensor(self.charging_status.chargeMode, "Charge mode")
-            self.addSensor(self.charging_status.chargePower_kW, "Charge power", "power", "W")
+            self.addSensor(self.charging_status.chargePower_kW, "Charge power", "power", "kW")
             self.addSensor(self.charging_status.chargeRate_kmph, "Charge rate", unit_of_measurement="kmph")
             #self.addSwitch(self.charging_controls, self.charging_status.chargingState, "Charge switch", [ChargingStatus.ChargingState.CHARGING], [])
 
